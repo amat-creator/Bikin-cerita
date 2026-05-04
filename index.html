@@ -78,6 +78,9 @@
       const [view, setView] = useState('library'); 
       const [showCharModal, setShowCharModal] = useState(false);
       const [newCharName, setNewCharName] = useState("");
+      const [newCharRole, setNewCharRole] = useState("Pemeran Utama");
+      const [newCharDesc, setNewCharDesc] = useState("");
+      const [newCharAppearance, setNewCharAppearance] = useState("");
       const [showDialogMenu, setShowDialogMenu] = useState(false);
       const [charSearchQuery, setCharSearchQuery] = useState("");
       const [isManageMode, setIsManageMode] = useState(false);
@@ -101,7 +104,7 @@
             { id: Date.now().toString() + '_2', type: 'action', character: '', text: '' }
           ] 
         }],
-        characters: ["NARATOR"],
+        characters: [{ id: Date.now().toString(), name: "NARATOR", role: "Pencerita", description: "Suara latar yang menceritakan adegan.", appearance: "-" }],
         updatedAt: Date.now()
       });
 
@@ -155,7 +158,15 @@
         setActiveBookId(book.id);
         setBookTitle(book.title);
         setPages(book.pages);
-        setCharacters(book.characters);
+        
+        // Konversi otomatis dari karakter lama (hanya nama) ke sistem Database Baru
+        const migratedChars = (book.characters || []).map((c, i) => 
+          typeof c === 'string' 
+            ? { id: Date.now().toString() + i, name: c, role: "Belum Ditentukan", description: "", appearance: "" }
+            : c
+        );
+        setCharacters(migratedChars);
+        
         setHistory([]); 
         setView('grid');
       };
@@ -372,8 +383,18 @@
       const addCharacter = (e) => {
         e.preventDefault();
         if (newCharName.trim()) {
-          setCharacters([...characters, newCharName.trim().toUpperCase()]);
+          const newChar = {
+            id: Date.now().toString(),
+            name: newCharName.trim().toUpperCase(),
+            role: newCharRole,
+            description: newCharDesc,
+            appearance: newCharAppearance
+          };
+          setCharacters([...characters, newChar]);
           setNewCharName("");
+          setNewCharRole("Pemeran Utama");
+          setNewCharDesc("");
+          setNewCharAppearance("");
         }
       };
 
@@ -844,17 +865,17 @@
                                 </div>
                               </div>
                               <div className="max-h-40 overflow-y-auto p-1.5 flex flex-col gap-0.5 custom-scrollbar">
-                                {characters.filter(c => c.toLowerCase().includes(charSearchQuery.toLowerCase())).length === 0 ? (
-                                  <div className="text-center text-[10px] text-slate-400 py-3 font-bold">Tak ditemukan</div>
-                                ) : (
-                                  characters.filter(c => c.toLowerCase().includes(charSearchQuery.toLowerCase())).map((char, idx) => (
-                                    <button key={idx} onClick={() => { addBlock('dialogue', char); setShowDialogMenu(false); setCharSearchQuery(""); }} className="text-left px-2.5 py-1.5 text-[11px] font-black hover:bg-slate-100 rounded-md transition-colors uppercase">
-                                      {char}
-                                    </button>
-                                  ))
-                                )}
-                                <div className="h-px bg-slate-100 my-1"></div>
-                                <button onClick={() => { setShowDialogMenu(false); setShowCharModal(true); }} className="text-left px-2.5 py-1.5 text-[11px] font-bold text-blue-600 hover:bg-blue-50 rounded-md transition-colors flex items-center gap-1.5">
+                            {characters.filter(c => (c.name || '').toLowerCase().includes(charSearchQuery.toLowerCase())).length === 0 ? (
+                              <div className="text-center text-[10px] text-slate-400 py-3 font-bold">Tak ditemukan</div>
+                            ) : (
+                              characters.filter(c => (c.name || '').toLowerCase().includes(charSearchQuery.toLowerCase())).map((char) => (
+                                <button key={char.id} onClick={() => { addBlock('dialogue', char.name); setShowDialogMenu(false); setCharSearchQuery(""); }} className="text-left px-2.5 py-1.5 text-[11px] font-black hover:bg-slate-100 rounded-md transition-colors uppercase">
+                                  {char.name} <span className="text-[8px] font-normal text-slate-400 ml-1">({char.role})</span>
+                                </button>
+                              ))
+                            )}
+                            <div className="h-px bg-slate-100 my-1"></div>
+                            <button onClick={() => { setShowDialogMenu(false); setShowCharModal(true); }} className="text-left px-2.5 py-1.5 text-[11px] font-bold text-blue-600 hover:bg-blue-50 rounded-md transition-colors flex items-center gap-1.5">
                                   <Icon name="plus" size={12} /> Buat Karakter Baru
                                 </button>
                               </div>
@@ -1015,20 +1036,63 @@
 
           {/* --- MODAL DAFTAR KARAKTER --- */}
           {showCharModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-sm">
-              <div className="bg-white rounded-[2rem] w-full max-w-sm shadow-2xl border-4 border-slate-900 overflow-hidden animate-in zoom-in-95 duration-200">
-                <div className="p-6 border-b-4 border-slate-900 bg-yellow-50 flex justify-between items-center">
-                  <h3 className="text-xl font-black flex items-center gap-2"><Icon name="users" size={24} /> Karakter</h3>
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-slate-900/60 backdrop-blur-sm">
+              <div className="bg-white rounded-[2rem] w-full max-w-2xl shadow-2xl border-4 border-slate-900 overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+                <div className="p-5 sm:p-6 border-b-4 border-slate-900 bg-yellow-50 flex justify-between items-center shrink-0">
+                  <h3 className="text-xl font-black flex items-center gap-2"><Icon name="users" size={24} /> Database Karakter</h3>
                   <button onClick={() => setShowCharModal(false)} className="text-slate-400 hover:text-slate-900"><Icon name="x" size={24} /></button>
                 </div>
-                <div className="p-6">
-                  <form onSubmit={addCharacter} className="flex gap-2 mb-6">
-                    <input type="text" value={newCharName} onChange={(e) => setNewCharName(e.target.value)} placeholder="NAMA..." className="flex-1 border-2 border-slate-900 rounded-xl px-4 py-2 outline-none focus:bg-slate-50 uppercase font-black text-sm" />
-                    <button type="submit" className="bg-slate-900 text-white px-4 py-2 rounded-xl font-bold shadow-[2px_2px_0px_rgba(15,23,42,0.3)] active:translate-y-[2px] active:shadow-none">+</button>
-                  </form>
-                  <div className="grid grid-cols-1 gap-2 max-h-60 overflow-y-auto custom-scrollbar">
-                    {characters.map((char, idx) => (
-                      <div key={idx} className="flex justify-between items-center bg-white p-3 border-2 border-slate-200 rounded-xl hover:border-slate-900 transition-colors group"><span className="font-black text-sm tracking-wide">{char}</span><button onClick={() => setCharacters(characters.filter((_, i) => i !== idx))} className="text-slate-300 hover:text-red-500"><Icon name="trash" size={16} /></button></div>
+                
+                <div className="p-5 sm:p-6 overflow-y-auto custom-scrollbar">
+                  <div className="bg-slate-50 border-2 border-slate-200 rounded-2xl p-4 sm:p-5 mb-6 shadow-inner">
+                    <h4 className="font-black text-sm mb-3 flex items-center gap-2"><Icon name="user-plus" size={16}/> Tambah Karakter Baru</h4>
+                    <form onSubmit={addCharacter} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <input type="text" value={newCharName} onChange={(e) => setNewCharName(e.target.value)} placeholder="NAMA KARAKTER..." className="border-2 border-slate-900 rounded-xl px-3 py-2 outline-none focus:bg-white uppercase font-black text-sm" required />
+                      
+                      <select value={newCharRole} onChange={(e) => setNewCharRole(e.target.value)} className="border-2 border-slate-900 rounded-xl px-3 py-2 outline-none focus:bg-white font-bold text-sm bg-white text-slate-700">
+                        <option value="Pemeran Utama">Pemeran Utama</option>
+                        <option value="Pemeran Pendukung">Pemeran Pendukung</option>
+                        <option value="Antagonis">Antagonis / Penjahat</option>
+                        <option value="Figuran">Figuran</option>
+                        <option value="Pencerita">Pencerita (Narator)</option>
+                      </select>
+                      
+                      <textarea value={newCharDesc} onChange={(e) => setNewCharDesc(e.target.value)} placeholder="Tugas / Latar Belakang (cth: Teman masa kecil protagonis, ahli meretas komputer)..." className="sm:col-span-2 border-2 border-slate-900 rounded-xl px-3 py-2 outline-none focus:bg-white font-medium text-sm text-slate-700 resize-none h-16" />
+                      
+                      <textarea value={newCharAppearance} onChange={(e) => setNewCharAppearance(e.target.value)} placeholder="Pakaian / Penampilan (cth: Selalu memakai jaket kulit hitam dan kacamata retak)..." className="sm:col-span-2 border-2 border-slate-900 rounded-xl px-3 py-2 outline-none focus:bg-white font-medium text-sm text-slate-700 resize-none h-16" />
+                      
+                      <button type="submit" className="sm:col-span-2 bg-slate-900 text-white px-4 py-3 rounded-xl font-black shadow-[3px_3px_0px_rgba(15,23,42,0.3)] active:translate-y-[3px] active:shadow-none transition-all flex justify-center items-center gap-2 mt-1">
+                        <Icon name="plus" size={16} /> SIMPAN KARAKTER
+                      </button>
+                    </form>
+                  </div>
+                  
+                  <h4 className="font-black text-sm mb-3 flex items-center gap-2"><Icon name="address-book" size={16}/> Daftar Karakter ({characters.length})</h4>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {characters.map((char) => (
+                      <div key={char.id} className="bg-white p-4 border-2 border-slate-200 rounded-xl hover:border-slate-900 transition-colors group relative flex flex-col gap-2">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <span className="font-black text-sm tracking-wide uppercase">{char.name}</span>
+                            <span className={`ml-2 text-[9px] font-bold px-2 py-0.5 rounded-full ${char.role === 'Pemeran Utama' ? 'bg-amber-100 text-amber-700' : char.role === 'Antagonis' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-600'}`}>{char.role}</span>
+                          </div>
+                          <button onClick={() => setCharacters(characters.filter(c => c.id !== char.id))} className="text-slate-300 hover:text-red-500 bg-white p-1 rounded-md shrink-0 ml-2">
+                            <Icon name="trash" size={16} />
+                          </button>
+                        </div>
+                        
+                        {char.description && (
+                          <div className="text-[11px] text-slate-600 leading-snug mt-1">
+                            <strong className="text-slate-800">Peran:</strong> {char.description}
+                          </div>
+                        )}
+                        {char.appearance && (
+                          <div className="text-[11px] text-slate-600 leading-snug">
+                            <strong className="text-slate-800">Penampilan:</strong> {char.appearance}
+                          </div>
+                        )}
+                      </div>
                     ))}
                   </div>
                 </div>
