@@ -1,0 +1,1042 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NaskahKu - Penulis Naskah</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Phosphor Icons (Pengganti Lucide) -->
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+  
+  <!-- React & ReactDOM -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  
+  <!-- Babel untuk menerjemahkan JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // Komponen Ikon Sederhana (Menggunakan Phosphor Icons)
+    const Icon = ({ name, size = 18, className = "" }) => (
+      <i className={`ph ph-${name} ${className}`} style={{ fontSize: size }}></i>
+    );
+
+    // Komponen Textarea yang otomatis menyesuaikan tinggi
+    const AutoResizeTextarea = ({ value, onChange, placeholder, className, autoFocus }) => {
+      const textareaRef = useRef(null);
+
+      useEffect(() => {
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto';
+          textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+        }
+      }, [value]);
+
+      return (
+        <textarea
+          ref={textareaRef}
+          value={value}
+          onChange={onChange}
+          placeholder={placeholder}
+          autoFocus={autoFocus}
+          rows={1}
+          className={`overflow-hidden resize-none outline-none bg-transparent ${className}`}
+        />
+      );
+    };
+
+    const App = () => {
+      const MAX_LINES_PER_PAGE = 65; 
+
+      // --- STATE UNTUK PERPUSTAKAAN (LIBRARY) ---
+      const [books, setBooks] = useState([]);
+      const [activeBookId, setActiveBookId] = useState(null);
+      const [bookTitle, setBookTitle] = useState("");
+      const [bookToDelete, setBookToDelete] = useState(null); 
+
+      // --- STATE NASKAH (Untuk Buku yang sedang aktif) ---
+      const [pages, setPages] = useState([]);
+      const [characters, setCharacters] = useState([]);
+      const [currentPageIndex, setCurrentPageIndex] = useState(null);
+      
+      // --- STATE UI & LAINNYA ---
+      const [view, setView] = useState('library'); 
+      const [showCharModal, setShowCharModal] = useState(false);
+      const [newCharName, setNewCharName] = useState("");
+      const [showDialogMenu, setShowDialogMenu] = useState(false);
+      const [charSearchQuery, setCharSearchQuery] = useState("");
+      const [isManageMode, setIsManageMode] = useState(false);
+      const [selectedPages, setSelectedPages] = useState([]);
+
+      const fileInputRef = useRef(null);
+      const [toastMessage, setToastMessage] = useState("");
+      const [history, setHistory] = useState([]);
+      const [showHistoryModal, setShowHistoryModal] = useState(false);
+      const [isExportingImage, setIsExportingImage] = useState(false);
+      const [showExportModal, setShowExportModal] = useState(false);
+      const [exportSelection, setExportSelection] = useState([]);
+
+      const createEmptyBook = () => ({
+        id: Date.now().toString(),
+        title: "Buku Baru",
+        pages: [{ 
+          id: 1, 
+          blocks: [
+            { id: Date.now().toString() + '_1', type: 'heading', character: '', text: '' },
+            { id: Date.now().toString() + '_2', type: 'action', character: '', text: '' }
+          ] 
+        }],
+        characters: ["NARATOR"],
+        updatedAt: Date.now()
+      });
+
+      useEffect(() => {
+        const savedBooks = localStorage.getItem('script_app_index_v1');
+        if (savedBooks) {
+          try { 
+            const parsed = JSON.parse(savedBooks);
+            if (parsed.length > 0) setBooks(parsed);
+            else setBooks([createEmptyBook()]);
+          } catch (e) {
+            setBooks([createEmptyBook()]);
+          }
+        } else {
+          setBooks([createEmptyBook()]);
+        }
+      }, []);
+
+      useEffect(() => {
+        localStorage.setItem('script_app_index_v1', JSON.stringify(books));
+      }, [books]);
+
+      useEffect(() => {
+        if (activeBookId) {
+          setBooks(prevBooks => {
+            const currentBook = prevBooks.find(b => b.id === activeBookId);
+            if (currentBook && (currentBook.title !== bookTitle || currentBook.pages !== pages || currentBook.characters !== characters)) {
+              return prevBooks.map(b => 
+                b.id === activeBookId 
+                  ? { ...b, title: bookTitle, pages, characters, updatedAt: Date.now() } 
+                  : b
+              );
+            }
+            return prevBooks;
+          });
+        }
+      }, [pages, characters, bookTitle, activeBookId]);
+
+      const showToast = (msg) => {
+        setToastMessage(msg);
+        setTimeout(() => setToastMessage(""), 3000);
+      };
+
+      const handleCreateBook = () => {
+        const newBook = createEmptyBook();
+        setBooks([...books, newBook]);
+        showToast("Buku baru berhasil dibuat!");
+      };
+
+      const openBook = (book) => {
+        setActiveBookId(book.id);
+        setBookTitle(book.title);
+        setPages(book.pages);
+        setCharacters(book.characters);
+        setHistory([]); 
+        setView('grid');
+      };
+
+      const closeBook = () => {
+        setActiveBookId(null);
+        setView('library');
+      };
+
+      const confirmDeleteBook = (bookId) => setBookToDelete(bookId);
+
+      const executeDeleteBook = () => {
+        if (bookToDelete) {
+          const remainingBooks = books.filter(b => b.id !== bookToDelete);
+          if (remainingBooks.length === 0) setBooks([createEmptyBook()]);
+          else setBooks(remainingBooks);
+          
+          setBookToDelete(null);
+          showToast("Buku berhasil dihapus.");
+        }
+      };
+
+      const saveToHistory = (actionName) => {
+        const newLog = {
+          id: Date.now(),
+          action: actionName,
+          timestamp: new Date().toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }),
+          data: JSON.parse(JSON.stringify(pages))
+        };
+        const updatedHistory = [newLog, ...history].slice(0, 10);
+        setHistory(updatedHistory);
+      };
+
+      const restoreFromHistory = (logData) => {
+        setPages(logData);
+        setShowHistoryModal(false);
+        showToast("Berhasil dipulihkan dari Riwayat!");
+      };
+
+      const exportBackup = () => {
+        const backupData = { books: books, version: 'index_v1' };
+        const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `Backup_Semua_Buku_${new Date().toISOString().split('T')[0]}.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+        showToast("File backup berhasil diunduh!");
+      };
+
+      const importBackup = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          try {
+            const data = JSON.parse(event.target.result);
+            if (data.books && Array.isArray(data.books)) {
+              setBooks(data.books);
+              showToast("Data perpustakaan berhasil dipulihkan!");
+              if (activeBookId) closeBook(); 
+            } else {
+              showToast("Format file backup tidak valid.");
+            }
+          } catch (err) {
+            showToast("Gagal membaca file backup.");
+          }
+        };
+        reader.readAsText(file);
+        e.target.value = null; 
+      };
+
+      const addPage = () => {
+        const newId = pages.length > 0 ? pages[pages.length - 1].id + 1 : 1;
+        setPages([...pages, { id: newId, blocks: [{ id: Date.now().toString(), type: 'action', text: '' }] }]);
+      };
+
+      const deletePage = (index) => {
+        if (pages.length === 1) {
+          showToast("Buku harus memiliki minimal 1 halaman.");
+          return;
+        }
+        saveToHistory(`Hapus Hal. ${pages[index].id}`);
+        const newPages = pages.filter((_, i) => i !== index);
+        const reIndexed = newPages.map((page, i) => ({ ...page, id: i + 1 }));
+        setPages(reIndexed);
+        if (view === 'editor') setView('grid');
+        showToast("Halaman dihapus.");
+      };
+
+      const deleteSelectedPages = () => {
+        if (selectedPages.length === 0) return;
+        saveToHistory(`Hapus ${selectedPages.length} Halaman (Massal)`);
+        const newPages = pages.filter((_, index) => !selectedPages.includes(index));
+        if (newPages.length === 0) {
+          setPages([{ id: 1, blocks: [{ id: Date.now().toString(), type: 'action', text: '' }] }]);
+        } else {
+          const reIndexed = newPages.map((page, i) => ({ ...page, id: i + 1 }));
+          setPages(reIndexed);
+        }
+        setSelectedPages([]);
+        setIsManageMode(false);
+        showToast(`${selectedPages.length} halaman dihapus.`);
+      };
+
+      const toggleManageMode = () => {
+        setIsManageMode(!isManageMode);
+        setSelectedPages([]);
+      };
+
+      const togglePageSelection = (index) => {
+        if (selectedPages.includes(index)) setSelectedPages(selectedPages.filter(i => i !== index));
+        else setSelectedPages([...selectedPages, index]);
+      };
+
+      const handleSelectAll = () => {
+        if (selectedPages.length === pages.length) setSelectedPages([]); 
+        else setSelectedPages(pages.map((_, i) => i)); 
+      };
+
+      const movePageOrder = (index, direction) => {
+        const newPages = [...pages];
+        if (direction === 'left' && index > 0) {
+          const temp = newPages[index];
+          newPages[index] = newPages[index - 1];
+          newPages[index - 1] = temp;
+        } else if (direction === 'right' && index < pages.length - 1) {
+          const temp = newPages[index];
+          newPages[index] = newPages[index + 1];
+          newPages[index + 1] = temp;
+        } else return;
+        
+        const reIndexed = newPages.map((page, i) => ({ ...page, id: i + 1 }));
+        setPages(reIndexed);
+        setSelectedPages([]); 
+      };
+
+      const getPageLines = (pageIndex) => {
+        if (pageIndex === null || !pages[pageIndex]) return 0;
+        return pages[pageIndex].blocks.reduce((totalLines, block) => {
+          if (block.type === 'heading') return totalLines + 2; 
+          const textLines = block.text.split('\n').reduce((acc, line) => {
+            const charsPerLine = block.type === 'action' ? 90 : 70;
+            return acc + Math.max(1, Math.ceil(line.length / charsPerLine));
+          }, 0);
+          if (block.type === 'action') return totalLines + 1 + textLines; 
+          if (block.type === 'dialogue') return totalLines + 1.2 + textLines; 
+          return totalLines + textLines;
+        }, 0);
+      };
+
+      const addBlock = (type, character = "") => {
+        if (currentPageIndex === null) return;
+        const newBlock = { id: Date.now().toString(), type, character, text: "" };
+        const newPages = [...pages];
+        newPages[currentPageIndex].blocks.push(newBlock);
+        setPages(newPages);
+      };
+
+      const updateBlockText = (blockId, newText) => {
+        if (currentPageIndex === null) return;
+        const newPages = [...pages];
+        const blockIndex = newPages[currentPageIndex].blocks.findIndex(b => b.id === blockId);
+        if (blockIndex > -1) {
+          newPages[currentPageIndex].blocks[blockIndex].text = newText;
+          setPages(newPages);
+        }
+      };
+
+      const removeBlock = (blockId) => {
+        if (currentPageIndex === null) return;
+        const newPages = [...pages];
+        newPages[currentPageIndex].blocks = newPages[currentPageIndex].blocks.filter(b => b.id !== blockId);
+        if (newPages[currentPageIndex].blocks.length === 0) {
+          newPages[currentPageIndex].blocks.push({ id: Date.now().toString(), type: 'action', text: '' });
+        }
+        setPages(newPages);
+      };
+
+      const moveBlock = (index, direction) => {
+        if (currentPageIndex === null) return;
+        const newPages = [...pages];
+        const blocks = [...newPages[currentPageIndex].blocks];
+        if (direction === 'up' && index > 0) {
+          const temp = blocks[index];
+          blocks[index] = blocks[index - 1];
+          blocks[index - 1] = temp;
+        } else if (direction === 'down' && index < blocks.length - 1) {
+          const temp = blocks[index];
+          blocks[index] = blocks[index + 1];
+          blocks[index + 1] = temp;
+        }
+        newPages[currentPageIndex].blocks = blocks;
+        setPages(newPages);
+      };
+
+      const openEditor = (index) => {
+        setCurrentPageIndex(index);
+        setView('editor');
+      };
+
+      const addCharacter = (e) => {
+        e.preventDefault();
+        if (newCharName.trim()) {
+          setCharacters([...characters, newCharName.trim().toUpperCase()]);
+          setNewCharName("");
+        }
+      };
+
+      const openExportModal = () => {
+        setExportSelection(pages.map((_, i) => i)); 
+        setShowExportModal(true);
+      };
+
+      const toggleExportSelection = (index) => {
+        if (exportSelection.includes(index)) setExportSelection(exportSelection.filter(i => i !== index));
+        else setExportSelection([...exportSelection, index]);
+      };
+
+      const executeExportImages = async () => {
+        setIsExportingImage(true);
+        setShowExportModal(false);
+        showToast(`Memproses ${exportSelection.length} halaman...`);
+
+        if (!window.html2canvas) {
+          await new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+            script.onload = resolve;
+            script.onerror = reject;
+            document.head.appendChild(script);
+          });
+        }
+
+        if (exportSelection.length > 1 && !window.JSZip) {
+          await new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+            script.onload = resolve;
+            script.onerror = reject;
+            document.head.appendChild(script);
+          });
+        }
+
+        try {
+          if (exportSelection.length === 1) {
+            const pageIndex = exportSelection[0];
+            const pageId = pages[pageIndex].id;
+            const captureArea = document.getElementById(`export-page-${pageId}`);
+            
+            if (captureArea) {
+              const canvas = await window.html2canvas(captureArea, {
+                scale: 2, 
+                backgroundColor: '#ffffff', 
+                logging: false,
+                scrollY: 0,
+                scrollX: 0
+              });
+              
+              const dataUrl = canvas.toDataURL('image/png');
+              const link = document.createElement('a');
+              link.href = dataUrl;
+              link.download = `${bookTitle}_Hal_${pageId}.png`;
+              link.click();
+            }
+          } else {
+            const zip = new window.JSZip();
+            
+            for (const pageIndex of exportSelection) {
+              const pageId = pages[pageIndex].id;
+              const captureArea = document.getElementById(`export-page-${pageId}`);
+              
+              if (captureArea) {
+                const canvas = await window.html2canvas(captureArea, {
+                  scale: 2, 
+                  backgroundColor: '#ffffff', 
+                  logging: false,
+                  scrollY: 0,
+                  scrollX: 0
+                });
+                
+                const dataUrl = canvas.toDataURL('image/png');
+                const base64Data = dataUrl.replace(/^data:image\/(png|jpg);base64,/, "");
+                zip.file(`${bookTitle}_Hal_${pageId}.png`, base64Data, {base64: true});
+              }
+            }
+            
+            const content = await zip.generateAsync({type:"blob"});
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(content);
+            const safeTitle = bookTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+            link.download = `${safeTitle || 'NaskahKu'}_Gambar.zip`;
+            link.click();
+          }
+          
+          showToast("Berhasil mengunduh gambar!");
+        } catch (error) {
+          console.error(error);
+          showToast("Terjadi kesalahan saat mengekspor.");
+        } finally {
+          setIsExportingImage(false);
+        }
+      };
+
+      const currentLines = currentPageIndex !== null ? getPageLines(currentPageIndex) : 0;
+      const isOverLimit = currentLines >= MAX_LINES_PER_PAGE;
+
+      return (
+        <div className="min-h-screen bg-[#f1f5f9] font-sans text-slate-800 selection:bg-blue-100 overflow-x-hidden">
+          
+          {/* AREA RENDER GAMBAR RAHASIA */}
+          {view !== 'library' && (
+            <div className="absolute top-0 left-[-9999px] opacity-0 pointer-events-none z-[-1]">
+              <div id="image-export-container" className="flex flex-col gap-4">
+                {pages.map((page) => (
+                  <div 
+                    key={`render-${page.id}`} 
+                    id={`export-page-${page.id}`}
+                    className="bg-white relative overflow-hidden text-black"
+                    style={{ width: '794px', height: '1123px', padding: '40px' }} 
+                  >
+                    <div className="flex justify-between items-center text-gray-400 font-bold text-[12px] mb-4 pb-2 border-b border-gray-200 uppercase tracking-widest">
+                      <span>{bookTitle}</span>
+                      <span>HALAMAN {page.id}</span>
+                    </div>
+
+                    <div className="flex flex-col gap-2.5">
+                      {page.blocks.map(block => (
+                        <div key={`export-block-${block.id}`} className="w-full">
+                          {block.type === 'heading' && (
+                            <div className="text-[16px] font-black uppercase tracking-widest mt-1 text-black border-b-2 border-black inline-block pb-0.5">
+                              {block.text || '[ TEKS KOSONG ]'}
+                            </div>
+                          )}
+                          {block.type === 'action' && (
+                            <div className="text-[14px] leading-snug text-justify font-medium text-gray-800">
+                              {block.text}
+                            </div>
+                          )}
+                          {block.type === 'dialogue' && (
+                            <div className="flex items-start gap-2 mt-1">
+                              <div className="border-[1.5px] border-black px-2 py-0.5 font-black text-[12px] uppercase min-w-[80px] text-center rounded bg-white">
+                                {block.character}
+                              </div>
+                              <div className="font-black text-[16px] mt-0 leading-none pt-1">:</div>
+                              <div className="flex-1 border-[1.5px] border-black px-2.5 pt-0.5 pb-1 text-[14px] leading-tight rounded-md bg-white whitespace-pre-wrap">
+                                {block.text}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* HEADER UTAMA APLIKASI */}
+          <header className="bg-white border-b sticky top-0 z-30 px-6 py-4 shadow-sm">
+            <div className="max-w-5xl mx-auto flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                {view === 'editor' && (
+                  <button onClick={() => setView('grid')} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-500 hover:text-black">
+                    <Icon name="caret-left" size={24} />
+                  </button>
+                )}
+                {view === 'grid' && (
+                  <button onClick={closeBook} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-500 hover:text-black" title="Kembali ke Perpustakaan">
+                    <Icon name="caret-left" size={24} />
+                  </button>
+                )}
+
+                <div className="flex items-center gap-2">
+                  <Icon name="sparkle" className="text-amber-500 shrink-0" size={20} />
+                  {view === 'library' ? (
+                    <h1 className="font-black text-xl tracking-tight">NaskahKu</h1>
+                  ) : (
+                    <input 
+                      type="text"
+                      value={bookTitle}
+                      onChange={(e) => setBookTitle(e.target.value)}
+                      placeholder="Judul Buku..."
+                      className="font-black text-xl tracking-tight bg-transparent outline-none border-b-2 border-transparent focus:border-slate-300 w-40 sm:w-64 transition-colors"
+                    />
+                  )}
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-3">
+                {view !== 'library' && (
+                  <>
+                    <button onClick={() => setShowCharModal(true)} className="hidden sm:flex items-center gap-2 text-sm font-bold text-slate-500 hover:text-blue-600 px-3 py-2 transition-colors">
+                      <Icon name="users" size={18} /> Karakter
+                    </button>
+                    <button onClick={openExportModal} disabled={isExportingImage} className="bg-blue-600 text-white px-5 py-2.5 rounded-xl text-sm font-black flex items-center gap-2 hover:bg-blue-700 shadow-[2px_2px_0px_rgba(30,58,138,0.5)] active:translate-y-[2px] active:shadow-none transition-all disabled:opacity-70">
+                      {isExportingImage ? <Icon name="spinner-gap" size={18} className="animate-spin" /> : <Icon name="image" size={18} />}
+                      <span className="hidden sm:inline">{isExportingImage ? "Memproses..." : "Ekspor Gambar"}</span>
+                    </button>
+                  </>
+                )}
+                {view === 'library' && (
+                  <button onClick={exportBackup} className="bg-slate-100 text-slate-600 px-4 py-2.5 rounded-xl hover:bg-slate-200 font-bold transition-all flex items-center gap-2 text-sm">
+                    <Icon name="download-simple" size={18} /> Backup Semua
+                  </button>
+                )}
+              </div>
+            </div>
+          </header>
+
+          {/* AREA UTAMA */}
+          <main className="max-w-5xl mx-auto p-6">
+            
+            {/* VIEW 1: PERPUSTAKAAN BUKU */}
+            {view === 'library' && (
+              <div className="animate-in fade-in duration-500">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+                  <h2 className="text-2xl font-black text-slate-900 flex items-center gap-2">
+                    <Icon name="book" className="text-blue-600" size={24} /> Rak Buku
+                  </h2>
+                  
+                  <div className="flex items-center gap-2 w-full md:w-auto">
+                    <input type="file" accept=".json" ref={fileInputRef} onChange={importBackup} className="hidden" />
+                    <button onClick={() => fileInputRef.current.click()} className="bg-white border-2 border-slate-200 text-slate-600 p-2.5 rounded-xl hover:border-slate-400 font-bold transition-all flex items-center justify-center" title="Pulihkan dari Backup">
+                      <Icon name="upload-simple" size={18} />
+                    </button>
+                    <button onClick={handleCreateBook} className="bg-slate-900 text-white px-5 py-2.5 rounded-xl hover:bg-slate-800 font-black transition-all flex items-center gap-2 shadow-[3px_3px_0px_rgba(15,23,42,1)] active:translate-y-1 active:shadow-none text-sm w-full md:w-auto justify-center">
+                      <Icon name="plus" size={18} /> Buku Baru
+                    </button>
+                  </div>
+                </div>
+
+                {books.length === 0 ? (
+                  <div className="text-center py-20 bg-white rounded-3xl border-2 border-dashed border-slate-200">
+                    <Icon name="book" className="mx-auto text-slate-300 mb-4 block" size={48} />
+                    <p className="text-slate-500 font-bold">Rak bukumu masih kosong.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                    {books.map((book) => (
+                      <div key={book.id} className="relative group">
+                        <button
+                          onClick={() => openBook(book)}
+                          className="w-full bg-white rounded-3xl shadow-sm hover:shadow-xl transition-all p-6 text-left flex flex-col border-2 border-slate-100 hover:border-blue-300 aspect-[4/5] relative overflow-hidden"
+                        >
+                          <div className="absolute top-0 left-0 w-2 h-full bg-blue-600"></div>
+                          
+                          <div className="mb-auto mt-2 pl-3">
+                            <h3 className="font-black text-lg leading-tight text-slate-800 mb-2 line-clamp-3">
+                              {book.title}
+                            </h3>
+                            <span className="inline-block bg-blue-50 text-blue-600 px-2 py-1 rounded text-[10px] font-bold tracking-widest uppercase">
+                              {book.pages.length} Halaman
+                            </span>
+                          </div>
+                          
+                          <div className="pt-4 border-t border-slate-100 pl-3">
+                            <p className="text-[10px] text-slate-400 font-medium">
+                              Diperbarui: {new Date(book.updatedAt).toLocaleDateString('id-ID', {day: 'numeric', month: 'short'})}
+                            </p>
+                          </div>
+                        </button>
+                        
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); confirmDeleteBook(book.id); }}
+                          className="absolute -top-2 -right-2 bg-white text-red-500 p-2 rounded-full opacity-0 group-hover:opacity-100 transition-all shadow-md border border-red-100 hover:bg-red-500 hover:text-white z-10"
+                          title="Hapus Buku"
+                        >
+                          <Icon name="trash" size={16} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* VIEW 2: DAFTAR HALAMAN (GRID) DALAM BUKU */}
+            {view === 'grid' && (
+              <div className="animate-in fade-in duration-500">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+                  <h2 className="text-xl sm:text-2xl font-black text-slate-900 line-clamp-1">Isi: {bookTitle}</h2>
+                  
+                  <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                    {!isManageMode ? (
+                      <>
+                        <button onClick={() => setShowHistoryModal(true)} className="bg-orange-50 text-orange-600 px-4 py-2.5 rounded-xl hover:bg-orange-100 font-bold transition-all flex items-center gap-2 border border-orange-200 text-sm" title="Riwayat Hapus Halaman">
+                          <Icon name="clock" size={16} /> Riwayat
+                        </button>
+                        <button onClick={toggleManageMode} className="bg-white border-2 border-slate-200 text-slate-600 px-4 py-2.5 rounded-xl hover:border-slate-900 hover:text-slate-900 font-bold transition-all flex items-center gap-2 text-sm">
+                          <Icon name="pencil-simple" size={16} /> Kelola
+                        </button>
+                        <button onClick={addPage} className="bg-white border-2 border-slate-900 text-slate-900 px-5 py-2.5 rounded-xl hover:bg-slate-900 hover:text-white font-black transition-all flex items-center gap-2 shadow-[3px_3px_0px_rgba(15,23,42,1)] active:translate-y-1 active:shadow-none text-sm">
+                          <Icon name="plus" size={18} /> Lembar Baru
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button onClick={handleSelectAll} className="bg-white border-2 border-slate-300 text-slate-700 px-4 py-2.5 rounded-xl hover:border-slate-900 font-bold transition-all flex items-center gap-2 text-sm">
+                          {selectedPages.length === pages.length ? <Icon name="check-square" size={16} className="text-blue-500" /> : <Icon name="square" size={16} />} Pilih Semua
+                        </button>
+                        <button onClick={deleteSelectedPages} disabled={selectedPages.length === 0} className="bg-red-500 border-2 border-red-700 text-white px-4 py-2.5 rounded-xl hover:bg-red-600 font-bold transition-all flex items-center gap-2 disabled:opacity-50 shadow-[3px_3px_0px_rgba(185,28,28,1)] active:translate-y-1 active:shadow-none text-sm">
+                          <Icon name="trash" size={16} /> Hapus ({selectedPages.length})
+                        </button>
+                        <button onClick={toggleManageMode} className="bg-slate-900 border-2 border-slate-900 text-white px-5 py-2.5 rounded-xl hover:bg-slate-800 font-black transition-all flex items-center gap-2 shadow-[3px_3px_0px_rgba(15,23,42,1)] active:translate-y-1 active:shadow-none text-sm">
+                          <Icon name="check-circle" size={16} /> Selesai
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
+                  {pages.map((page, index) => {
+                    const lines = getPageLines(index);
+                    const isSelected = selectedPages.includes(index);
+                    
+                    return (
+                      <div key={page.id} className={`relative group ${isManageMode && isSelected ? 'ring-4 ring-blue-500 rounded-2xl scale-[0.98] transition-transform' : ''}`}>
+                        <button
+                          onClick={() => isManageMode ? togglePageSelection(index) : openEditor(index)}
+                          className="w-full aspect-[3/4] bg-white rounded-2xl shadow-sm hover:shadow-md transition-all p-5 text-left flex flex-col border border-slate-200 relative"
+                        >
+                          {isManageMode && (
+                            <div className="absolute top-3 right-3 z-10 bg-white rounded shadow-sm">
+                              {isSelected ? <Icon name="check-square" size={20} className="text-blue-500" /> : <Icon name="square" size={20} className="text-slate-300" />}
+                            </div>
+                          )}
+
+                          <div className="flex justify-between items-center mb-3">
+                            <div className="bg-slate-100 px-2.5 py-1 rounded-md text-[10px] font-black text-slate-500 uppercase tracking-wider">
+                              Hal. {page.id}
+                            </div>
+                            <div className={`w-2 h-2 rounded-full ${lines > 0 ? (lines >= MAX_LINES_PER_PAGE ? 'bg-red-400' : 'bg-green-400') : 'bg-slate-200'}`}></div>
+                          </div>
+                          
+                          <div className="flex-1 overflow-hidden pointer-events-none mt-1 relative">
+                            <div className="space-y-1.5 opacity-50 text-[8px] font-medium leading-tight">
+                               {page.blocks.slice(0, 7).map(b => (
+                                 <div key={b.id} className="truncate">
+                                   {b.type === 'dialogue' && <span className="font-bold border border-slate-300 px-1 rounded inline-block mr-1">{b.character}</span>}
+                                   {b.type === 'heading' && <span className="font-bold uppercase text-[8px]">{b.text || '...'}</span>}
+                                   {b.type !== 'heading' && <span>{b.text || '...'}</span>}
+                                 </div>
+                               ))}
+                            </div>
+                          </div>
+
+                          <div className="mt-3 pt-3 border-t border-slate-100 flex justify-between items-center">
+                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Isi: {Math.ceil(lines)}/{MAX_LINES_PER_PAGE}</span>
+                          </div>
+                        </button>
+                        
+                        {!isManageMode && pages.length > 1 && (
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); deletePage(index); }}
+                            className="absolute -top-2 -right-2 bg-white text-red-500 p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-all shadow border border-red-100 hover:bg-red-500 hover:text-white"
+                          >
+                            <Icon name="trash" size={14} />
+                          </button>
+                        )}
+
+                        {isManageMode && (
+                          <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-slate-900 rounded-lg p-0.5 shadow-lg z-20">
+                            <button onClick={(e) => { e.stopPropagation(); movePageOrder(index, 'left'); }} disabled={index === 0} className="p-1 text-white hover:text-blue-400 disabled:opacity-30 disabled:hover:text-white transition-colors">
+                               <Icon name="arrow-left" size={14} />
+                            </button>
+                            <span className="text-[9px] text-slate-300 font-bold px-1 uppercase tracking-widest">Geser</span>
+                            <button onClick={(e) => { e.stopPropagation(); movePageOrder(index, 'right'); }} disabled={index === pages.length - 1} className="p-1 text-white hover:text-blue-400 disabled:opacity-30 disabled:hover:text-white transition-colors">
+                               <Icon name="arrow-right" size={14} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* VIEW 3: EDITOR KERTAS */}
+            {view === 'editor' && (
+              <div className="animate-in slide-in-from-bottom-8 duration-500 max-w-2xl mx-auto">
+                <div className="relative group">
+                  <div className="bg-white rounded-2xl shadow-lg overflow-hidden border border-slate-200">
+                    <div className="bg-slate-50 border-b border-slate-200 px-6 py-3 flex justify-between items-center">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2.5 h-2.5 rounded-full bg-slate-300"></div>
+                        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">HALAMAN {pages[currentPageIndex].id}</h3>
+                      </div>
+                      {isOverLimit && (
+                        <span className="text-[9px] font-bold text-white bg-red-500 px-2 py-0.5 rounded shadow-sm">
+                          KERTAS PENUH
+                        </span>
+                      )}
+                    </div>
+                    
+                    <div className="min-h-[60vh] p-5 sm:p-8 relative flex flex-col gap-3">
+                      <div className="absolute inset-0 pointer-events-none opacity-[0.03] bg-[linear-gradient(transparent_23px,#000_24px)] [background-size:100%_24px]"></div>
+
+                      {pages[currentPageIndex].blocks.map((block, index) => (
+                        <div key={block.id} className="relative group/block flex items-start gap-2 z-10 w-full animate-in fade-in pr-6">
+                          <div className="absolute right-0 top-1 flex flex-col opacity-100 sm:opacity-0 group-hover/block:opacity-100 transition-opacity bg-white border border-slate-200 shadow-sm rounded-md overflow-hidden">
+                            <button onClick={() => moveBlock(index, 'up')} disabled={index === 0} className="p-1 text-slate-400 hover:text-blue-500 hover:bg-blue-50 disabled:opacity-30">
+                              <Icon name="arrow-up" size={12} />
+                            </button>
+                            <div className="h-[1px] bg-slate-100 w-full"></div>
+                            <button onClick={() => moveBlock(index, 'down')} disabled={index === pages[currentPageIndex].blocks.length - 1} className="p-1 text-slate-400 hover:text-blue-500 hover:bg-blue-50 disabled:opacity-30">
+                              <Icon name="arrow-down" size={12} />
+                            </button>
+                            <div className="h-[1px] bg-slate-100 w-full"></div>
+                            <button onClick={() => removeBlock(block.id)} className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-50">
+                              <Icon name="trash" size={12} />
+                            </button>
+                          </div>
+
+                          {block.type === 'dialogue' && (
+                            <div className="flex w-full items-start gap-2">
+                              <div className="border-[1.5px] border-slate-900 rounded px-2 py-1 bg-white shrink-0 mt-0.5 shadow-sm min-w-[70px] text-center">
+                                <span className="font-bold text-[11px] uppercase tracking-wide">{block.character}</span>
+                              </div>
+                              <div className="font-bold text-sm mt-1 px-0.5">:</div>
+                              <AutoResizeTextarea 
+                                value={block.text}
+                                onChange={(e) => updateBlockText(block.id, e.target.value)}
+                                placeholder="Isi dialog..."
+                                autoFocus={index === pages[currentPageIndex].blocks.length - 1}
+                                className="flex-1 border border-slate-300 hover:border-slate-400 focus:border-blue-400 rounded-lg px-3 py-1.5 bg-white text-[13px] leading-snug transition-colors shadow-sm"
+                              />
+                            </div>
+                          )}
+
+                          {block.type === 'heading' && (
+                            <div className="w-full flex items-center gap-2">
+                              <Icon name="text-align-left" className="text-slate-300 shrink-0 mt-1" size={16} />
+                              <AutoResizeTextarea 
+                                value={block.text}
+                                onChange={(e) => updateBlockText(block.id, e.target.value)}
+                                placeholder="TEKS BESAR..."
+                                autoFocus={index === pages[currentPageIndex].blocks.length - 1}
+                                className="w-full text-sm font-black uppercase tracking-widest border-b-2 border-transparent hover:border-slate-300 focus:border-blue-400 py-1 rounded-none"
+                              />
+                            </div>
+                          )}
+
+                          {block.type === 'action' && (
+                            <AutoResizeTextarea 
+                              value={block.text}
+                              onChange={(e) => updateBlockText(block.id, e.target.value)}
+                              placeholder="Tulis deskripsi atau catatan..."
+                              autoFocus={index === pages[currentPageIndex].blocks.length - 1}
+                              className="w-full text-[13px] leading-snug font-medium text-slate-700 border border-transparent hover:bg-slate-50 focus:bg-slate-50 focus:border-slate-200 rounded-lg px-3 py-1.5 transition-colors"
+                            />
+                          )}
+                        </div>
+                      ))}
+
+                      <div className="pt-4 mt-2 border-t border-slate-100 flex flex-wrap gap-2 z-10 relative">
+                        <div className="relative">
+                          <button onClick={() => setShowDialogMenu(!showDialogMenu)} className="border-2 border-slate-900 bg-slate-900 text-white rounded-lg px-3 py-1.5 flex items-center gap-1.5 text-[11px] font-bold hover:bg-slate-800 transition-all shadow-[2px_2px_0px_rgba(15,23,42,1)] active:translate-y-[2px] active:shadow-none">
+                            <Icon name="chat-circle-text" size={12}/> Dialog
+                          </button>
+                          
+                          {showDialogMenu && (
+                            <div className="absolute bottom-full left-0 mb-2 w-48 bg-white border-2 border-slate-900 rounded-xl shadow-[3px_3px_0px_rgba(15,23,42,1)] overflow-hidden z-50 animate-in slide-in-from-bottom-2">
+                              <div className="p-2 border-b-2 border-slate-900 bg-slate-50">
+                                <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-md px-2 py-1 focus-within:border-blue-500">
+                                  <Icon name="magnifying-glass" size={12} className="text-slate-400" />
+                                  <input type="text" placeholder="Cari..." value={charSearchQuery} onChange={(e) => setCharSearchQuery(e.target.value)} className="w-full text-[11px] outline-none font-bold" autoFocus />
+                                </div>
+                              </div>
+                              <div className="max-h-40 overflow-y-auto p-1.5 flex flex-col gap-0.5 custom-scrollbar">
+                                {characters.filter(c => c.toLowerCase().includes(charSearchQuery.toLowerCase())).length === 0 ? (
+                                  <div className="text-center text-[10px] text-slate-400 py-3 font-bold">Tak ditemukan</div>
+                                ) : (
+                                  characters.filter(c => c.toLowerCase().includes(charSearchQuery.toLowerCase())).map((char, idx) => (
+                                    <button key={idx} onClick={() => { addBlock('dialogue', char); setShowDialogMenu(false); setCharSearchQuery(""); }} className="text-left px-2.5 py-1.5 text-[11px] font-black hover:bg-slate-100 rounded-md transition-colors uppercase">
+                                      {char}
+                                    </button>
+                                  ))
+                                )}
+                                <div className="h-px bg-slate-100 my-1"></div>
+                                <button onClick={() => { setShowDialogMenu(false); setShowCharModal(true); }} className="text-left px-2.5 py-1.5 text-[11px] font-bold text-blue-600 hover:bg-blue-50 rounded-md transition-colors flex items-center gap-1.5">
+                                  <Icon name="plus" size={12} /> Buat Karakter Baru
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        <button onClick={() => addBlock('heading')} className="border border-slate-200 bg-white text-slate-600 rounded-lg px-3 py-1.5 flex items-center gap-1.5 text-[11px] font-bold hover:border-slate-400 transition-all shadow-sm">
+                          <Icon name="text-align-left" size={12}/> Teks Besar
+                        </button>
+                        <button onClick={() => addBlock('action')} className="border border-slate-200 bg-white text-slate-600 rounded-lg px-3 py-1.5 flex items-center gap-1.5 text-[11px] font-bold hover:border-slate-400 transition-all shadow-sm">
+                          <Icon name="text-align-left" size={12}/> Teks Biasa
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-900 rounded-[1.2rem] mt-4 p-4 flex justify-between items-center text-white shadow-xl">
+                    <div className="text-[10px] font-bold tracking-wider flex items-center gap-3">
+                      ESTIMASI: {Math.ceil(currentLines)} / {MAX_LINES_PER_PAGE} BARIS
+                      <div className="w-20 h-1.5 bg-slate-700 rounded-full overflow-hidden hidden sm:block">
+                         <div className={`h-full transition-all duration-300 ${isOverLimit ? 'bg-red-500' : 'bg-blue-400'}`} style={{ width: `${Math.min((currentLines / MAX_LINES_PER_PAGE) * 100, 100)}%` }}></div>
+                      </div>
+                    </div>
+                    
+                    <div className="flex gap-2">
+                      {currentPageIndex > 0 && (
+                        <button onClick={() => setCurrentPageIndex(currentPageIndex - 1)} className="px-3 py-1.5 text-[11px] font-bold hover:bg-white/10 rounded-md transition-all">
+                          Kembali
+                        </button>
+                      )}
+                      <button onClick={() => {
+                          if (currentPageIndex === pages.length - 1) {
+                            addPage(); setCurrentPageIndex(pages.length);
+                          } else { setCurrentPageIndex(currentPageIndex + 1); }
+                        }} 
+                        className="bg-white text-slate-900 px-5 py-1.5 rounded-md text-[11px] font-black hover:bg-blue-500 hover:text-white transition-all active:scale-95"
+                      >
+                        {currentPageIndex === pages.length - 1 ? "Lembar Baru" : "Lanjut"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </main>
+
+          {/* --- MODAL KONFIRMASI HAPUS BUKU --- */}
+          {bookToDelete && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+              <div className="bg-white rounded-[2rem] w-full max-w-sm shadow-2xl overflow-hidden text-center p-8">
+                <div className="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Icon name="trash" size={32} />
+                </div>
+                <h3 className="text-xl font-black text-slate-900 mb-2">Hapus Buku Ini?</h3>
+                <p className="text-sm text-slate-500 mb-8">
+                  Buku yang dihapus tidak dapat dikembalikan. Pastikan kamu sudah melakukan backup jika buku ini penting.
+                </p>
+                <div className="flex gap-3">
+                  <button onClick={() => setBookToDelete(null)} className="flex-1 bg-slate-100 text-slate-700 py-3 rounded-xl font-bold hover:bg-slate-200 transition-colors">
+                    Batal
+                  </button>
+                  <button onClick={executeDeleteBook} className="flex-1 bg-red-500 text-white py-3 rounded-xl font-bold hover:bg-red-600 shadow-[3px_3px_0px_rgba(185,28,28,1)] active:translate-y-1 active:shadow-none transition-all">
+                    Hapus
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* --- MODAL EKSPOR GAMBAR --- */}
+          {showExportModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+              <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl border-2 border-slate-200 overflow-hidden">
+                <div className="p-5 border-b bg-slate-50 flex justify-between items-center">
+                  <h3 className="text-lg font-black flex items-center gap-2 text-slate-800">
+                    <Icon name="image" size={20} /> Unduh Naskah
+                  </h3>
+                  <button onClick={() => setShowExportModal(false)} className="text-slate-400 hover:text-slate-900 bg-white p-1 rounded-full shadow-sm">
+                    <Icon name="x" size={20} />
+                  </button>
+                </div>
+                
+                <div className="p-6">
+                  <p className="text-xs text-slate-500 font-medium mb-4 leading-relaxed">
+                    Pilih halaman naskah yang ingin diunduh. Jika mencentang lebih dari 1 halaman, sistem akan mengunduh file berupa <b>.ZIP</b>.
+                  </p>
+
+                  <div className="mb-3 flex gap-2">
+                    <button onClick={() => setExportSelection(pages.map((_, i) => i))} className="text-[10px] font-bold bg-slate-100 px-3 py-1.5 rounded hover:bg-slate-200">
+                      Pilih Semua
+                    </button>
+                    <button onClick={() => setExportSelection([])} className="text-[10px] font-bold bg-slate-100 px-3 py-1.5 rounded hover:bg-slate-200">
+                      Kosongkan
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-2 max-h-48 overflow-y-auto custom-scrollbar p-1">
+                    {pages.map((page, idx) => {
+                      const isSelected = exportSelection.includes(idx);
+                      return (
+                        <button
+                          key={`sel-${page.id}`}
+                          onClick={() => toggleExportSelection(idx)}
+                          className={`relative aspect-[3/4] rounded-lg border-2 flex items-center justify-center transition-all ${isSelected ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-slate-300 bg-white'}`}
+                        >
+                          <span className={`text-lg font-black ${isSelected ? 'text-blue-600' : 'text-slate-400'}`}>{page.id}</span>
+                          {isSelected && (
+                            <div className="absolute -top-1.5 -right-1.5 bg-blue-500 text-white rounded-full p-0.5 shadow-md">
+                              <Icon name="check-square" size={10} />
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="p-5 border-t bg-slate-50 flex gap-3">
+                  <button 
+                    onClick={executeExportImages}
+                    disabled={exportSelection.length === 0}
+                    className="w-full bg-blue-600 text-white py-3 rounded-xl font-black text-sm hover:bg-blue-700 shadow-[3px_3px_0px_rgba(30,58,138,0.3)] active:translate-y-1 active:shadow-none transition-all disabled:opacity-50"
+                  >
+                    Unduh {exportSelection.length} Halaman
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* --- MODAL RIWAYAT HALAMAN --- */}
+          {showHistoryModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+              <div className="bg-white rounded-[2rem] w-full max-w-md shadow-2xl border-4 border-orange-200 overflow-hidden">
+                <div className="p-6 border-b-4 border-orange-200 bg-orange-50 flex justify-between items-center">
+                  <h3 className="text-xl font-black flex items-center gap-2 text-orange-900"><Icon name="clock" size={24} /> Riwayat Naskah</h3>
+                  <button onClick={() => setShowHistoryModal(false)} className="text-orange-400 hover:text-orange-900"><Icon name="x" size={24} /></button>
+                </div>
+                <div className="p-6">
+                  <p className="text-xs text-slate-500 font-medium mb-4 leading-relaxed">Sistem otomatis membuat cadangan saat kamu menghapus halaman di buku ini.</p>
+                  <div className="grid grid-cols-1 gap-3 max-h-64 overflow-y-auto custom-scrollbar">
+                    {history.length === 0 ? (
+                      <div className="text-center py-8 text-slate-300 font-bold italic border-2 border-dashed border-slate-200 rounded-xl">Belum ada riwayat penghapusan.</div>
+                    ) : (
+                      history.map((log) => (
+                        <div key={log.id} className="flex justify-between items-center bg-white p-4 border-2 border-slate-100 rounded-xl hover:border-orange-300 transition-colors group">
+                          <div><span className="block font-black text-sm text-slate-800 uppercase tracking-wide">{log.action}</span><span className="block text-[10px] text-slate-400 font-bold mt-1">{log.timestamp} • {log.data.length} Halaman Tersimpan</span></div>
+                          <button onClick={() => restoreFromHistory(log.data)} className="bg-orange-100 text-orange-600 hover:bg-orange-600 hover:text-white px-3 py-2 rounded-lg font-bold text-xs transition-colors flex items-center gap-1 shadow-sm"><Icon name="arrow-counter-clockwise" size={14} /> Pulihkan</button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* --- MODAL DAFTAR KARAKTER --- */}
+          {showCharModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-900/60 backdrop-blur-sm">
+              <div className="bg-white rounded-[2rem] w-full max-w-sm shadow-2xl border-4 border-slate-900 overflow-hidden animate-in zoom-in-95 duration-200">
+                <div className="p-6 border-b-4 border-slate-900 bg-yellow-50 flex justify-between items-center">
+                  <h3 className="text-xl font-black flex items-center gap-2"><Icon name="users" size={24} /> Karakter</h3>
+                  <button onClick={() => setShowCharModal(false)} className="text-slate-400 hover:text-slate-900"><Icon name="x" size={24} /></button>
+                </div>
+                <div className="p-6">
+                  <form onSubmit={addCharacter} className="flex gap-2 mb-6">
+                    <input type="text" value={newCharName} onChange={(e) => setNewCharName(e.target.value)} placeholder="NAMA..." className="flex-1 border-2 border-slate-900 rounded-xl px-4 py-2 outline-none focus:bg-slate-50 uppercase font-black text-sm" />
+                    <button type="submit" className="bg-slate-900 text-white px-4 py-2 rounded-xl font-bold shadow-[2px_2px_0px_rgba(15,23,42,0.3)] active:translate-y-[2px] active:shadow-none">+</button>
+                  </form>
+                  <div className="grid grid-cols-1 gap-2 max-h-60 overflow-y-auto custom-scrollbar">
+                    {characters.map((char, idx) => (
+                      <div key={idx} className="flex justify-between items-center bg-white p-3 border-2 border-slate-200 rounded-xl hover:border-slate-900 transition-colors group"><span className="font-black text-sm tracking-wide">{char}</span><button onClick={() => setCharacters(characters.filter((_, i) => i !== idx))} className="text-slate-300 hover:text-red-500"><Icon name="trash" size={16} /></button></div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* --- TOAST NOTIFIKASI --- */}
+          {toastMessage && (
+            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-5 fade-in duration-300">
+              <div className="bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl font-bold text-sm flex items-center gap-2 border-2 border-slate-700">
+                <Icon name="check-circle" size={16} className="text-green-400" />
+                {toastMessage}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
