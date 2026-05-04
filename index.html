@@ -236,7 +236,11 @@
 
       const deletePage = (index) => {
         if (pages.length === 1) {
-          showToast("Buku harus memiliki minimal 1 halaman.");
+          saveToHistory(`Bersihkan Hal. ${pages[index].id}`);
+          const newPages = [...pages];
+          newPages[index] = { ...newPages[index], blocks: [{ id: Date.now().toString(), type: 'action', text: '' }] };
+          setPages(newPages);
+          showToast("Halaman dibersihkan.");
           return;
         }
         saveToHistory(`Hapus Hal. ${pages[index].id}`);
@@ -312,7 +316,10 @@
         if (currentPageIndex === null) return;
         const newBlock = { id: Date.now().toString(), type, character, text: "" };
         const newPages = [...pages];
-        newPages[currentPageIndex].blocks.push(newBlock);
+        newPages[currentPageIndex] = {
+          ...newPages[currentPageIndex],
+          blocks: [...newPages[currentPageIndex].blocks, newBlock]
+        };
         setPages(newPages);
       };
 
@@ -321,7 +328,9 @@
         const newPages = [...pages];
         const blockIndex = newPages[currentPageIndex].blocks.findIndex(b => b.id === blockId);
         if (blockIndex > -1) {
-          newPages[currentPageIndex].blocks[blockIndex].text = newText;
+          const newBlocks = [...newPages[currentPageIndex].blocks];
+          newBlocks[blockIndex] = { ...newBlocks[blockIndex], text: newText };
+          newPages[currentPageIndex] = { ...newPages[currentPageIndex], blocks: newBlocks };
           setPages(newPages);
         }
       };
@@ -329,10 +338,12 @@
       const removeBlock = (blockId) => {
         if (currentPageIndex === null) return;
         const newPages = [...pages];
-        newPages[currentPageIndex].blocks = newPages[currentPageIndex].blocks.filter(b => b.id !== blockId);
-        if (newPages[currentPageIndex].blocks.length === 0) {
-          newPages[currentPageIndex].blocks.push({ id: Date.now().toString(), type: 'action', text: '' });
+        let newBlocks = newPages[currentPageIndex].blocks.filter(b => b.id !== blockId);
+        if (newBlocks.length === 0) {
+          newBlocks = [{ id: Date.now().toString(), type: 'action', text: '' }];
+          showToast("Baris dibersihkan.");
         }
+        newPages[currentPageIndex] = { ...newPages[currentPageIndex], blocks: newBlocks };
         setPages(newPages);
       };
 
@@ -349,7 +360,7 @@
           blocks[index] = blocks[index + 1];
           blocks[index + 1] = temp;
         }
-        newPages[currentPageIndex].blocks = blocks;
+        newPages[currentPageIndex] = { ...newPages[currentPageIndex], blocks: blocks };
         setPages(newPages);
       };
 
@@ -622,8 +633,9 @@
                         </button>
                         
                         <button 
+                          type="button"
                           onClick={(e) => { e.stopPropagation(); confirmDeleteBook(book.id); }}
-                          className="absolute -top-2 -right-2 bg-white text-red-500 p-2 rounded-full opacity-0 group-hover:opacity-100 transition-all shadow-md border border-red-100 hover:bg-red-500 hover:text-white z-10"
+                          className="absolute -top-2 -right-2 bg-white text-red-500 p-2 rounded-full opacity-100 sm:opacity-0 group-hover:opacity-100 transition-all shadow-md border border-red-100 hover:bg-red-500 hover:text-white z-10"
                           title="Hapus Buku"
                         >
                           <Icon name="trash" size={16} />
@@ -711,10 +723,11 @@
                           </div>
                         </button>
                         
-                        {!isManageMode && pages.length > 1 && (
+                        {!isManageMode && (
                           <button 
+                            type="button"
                             onClick={(e) => { e.stopPropagation(); deletePage(index); }}
-                            className="absolute -top-2 -right-2 bg-white text-red-500 p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-all shadow border border-red-100 hover:bg-red-500 hover:text-white"
+                            className="absolute -top-2 -right-2 bg-white text-red-500 p-1.5 rounded-full opacity-100 sm:opacity-0 group-hover:opacity-100 transition-all shadow border border-red-100 hover:bg-red-500 hover:text-white z-10"
                           >
                             <Icon name="trash" size={14} />
                           </button>
@@ -722,7 +735,7 @@
 
                         {isManageMode && (
                           <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-slate-900 rounded-lg p-0.5 shadow-lg z-20">
-                            <button onClick={(e) => { e.stopPropagation(); movePageOrder(index, 'left'); }} disabled={index === 0} className="p-1 text-white hover:text-blue-400 disabled:opacity-30 disabled:hover:text-white transition-colors">
+                            <button type="button" onClick={(e) => { e.stopPropagation(); movePageOrder(index, 'left'); }} disabled={index === 0} className="p-1 text-white hover:text-blue-400 disabled:opacity-30 disabled:hover:text-white transition-colors">
                                <Icon name="arrow-left" size={14} />
                             </button>
                             <span className="text-[9px] text-slate-300 font-bold px-1 uppercase tracking-widest">Geser</span>
@@ -760,17 +773,18 @@
 
                       {pages[currentPageIndex].blocks.map((block, index) => (
                         <div key={block.id} className="relative group/block flex items-start gap-2 z-10 w-full animate-in fade-in pr-6">
-                          <div className="absolute right-0 top-1 flex flex-col opacity-100 sm:opacity-0 group-hover/block:opacity-100 transition-opacity bg-white border border-slate-200 shadow-sm rounded-md overflow-hidden">
-                            <button onClick={() => moveBlock(index, 'up')} disabled={index === 0} className="p-1 text-slate-400 hover:text-blue-500 hover:bg-blue-50 disabled:opacity-30">
-                              <Icon name="arrow-up" size={12} />
+                          <div className="absolute right-0 top-1 flex flex-col opacity-100 sm:opacity-0 group-hover/block:opacity-100 transition-opacity bg-white border border-slate-200 shadow-sm rounded-md overflow-hidden z-20">
+                            {/* PERBAIKAN: Hapus onPointerDown dan perbesar padding (p-2 sm:p-1.5) untuk HP */}
+                            <button type="button" onClick={() => moveBlock(index, 'up')} disabled={index === 0} className="p-2 sm:p-1.5 text-slate-400 hover:text-blue-500 hover:bg-blue-50 disabled:opacity-30">
+                              <Icon name="arrow-up" size={14} />
                             </button>
                             <div className="h-[1px] bg-slate-100 w-full"></div>
-                            <button onClick={() => moveBlock(index, 'down')} disabled={index === pages[currentPageIndex].blocks.length - 1} className="p-1 text-slate-400 hover:text-blue-500 hover:bg-blue-50 disabled:opacity-30">
-                              <Icon name="arrow-down" size={12} />
+                            <button type="button" onClick={() => moveBlock(index, 'down')} disabled={index === pages[currentPageIndex].blocks.length - 1} className="p-2 sm:p-1.5 text-slate-400 hover:text-blue-500 hover:bg-blue-50 disabled:opacity-30">
+                              <Icon name="arrow-down" size={14} />
                             </button>
                             <div className="h-[1px] bg-slate-100 w-full"></div>
-                            <button onClick={() => removeBlock(block.id)} className="p-1 text-slate-400 hover:text-red-500 hover:bg-red-50">
-                              <Icon name="trash" size={12} />
+                            <button type="button" onClick={() => removeBlock(block.id)} className="p-2 sm:p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50">
+                              <Icon name="trash" size={14} />
                             </button>
                           </div>
 
